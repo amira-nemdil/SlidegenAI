@@ -46,8 +46,5 @@ def main():
 
     print("\nImproved Text Preview:\n", improved[:1000])
 
-if name == "main":
-    main()
-from app.pdf_reader import extract_text_from_pdf
-from app.utils import clean_text
-from transformers import pipeline
+if __name__ == "__main__":
+ main()
