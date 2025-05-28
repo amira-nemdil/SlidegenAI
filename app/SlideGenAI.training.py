@@ -1,10 +1,11 @@
-# SlideGenAI Training Script for Final Project
+ # SlideGenAI Training Script with AMP Fixes, Padding Fix, and Scheduler Order
 
 import os
 import json
 import torch
 import random
 import numpy as np
+import time
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
@@ -18,25 +19,19 @@ from transformers import (
 from torch.optim import AdamW
 from rouge_score import rouge_scorer
 
-import torch
-print(torch.cuda.is_available())
-print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU detected")
-
-
-# Device setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
+if device.type != "cuda":
+    raise RuntimeError("🚨 GPU not detected. Please install PyTorch with CUDA support.")
 
-# Model and tokenizer
+print("✅ Using device:", torch.cuda.get_device_name(0))
+
 MODEL_NAME = "google/flan-t5-large"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME).to(device)
 
-# Dataset paths (update these to your local paths)
-ARXIV_PATH = r"C:\\Users\\amira\\Downloads\\datasets SlidegenAI\\arxiv-dataset\\arxiv-dataset\\train.txt"
-PUBMED_PATH = r"C:\\Users\\amira\\Downloads\\datasets SlidegenAI\\pubmed-dataset\\pubmed-dataset\\train.txt"
+ARXIV_PATH = r"C:\Users\amira\Downloads\datasets SlidegenAI\arxiv-dataset\arxiv-dataset\train.txt"
+PUBMED_PATH = r"C:\Users\amira\Downloads\datasets SlidegenAI\pubmed-dataset\pubmed-dataset\train.txt"
 
-# Preprocessing functions
 def load_jsonl(path):
     with open(path, 'r', encoding='utf-8') as f:
         return [json.loads(line) for line in f]
@@ -60,7 +55,6 @@ def preprocess(samples, name):
     print(f"{name} loaded: {len(result)} samples")
     return result
 
-# Dataset Class
 class SlideDataset(Dataset):
     def __init__(self, data, tokenizer, max_input_len=512, max_output_len=128):
         self.data = data
@@ -75,65 +69,70 @@ class SlideDataset(Dataset):
         item = self.data[idx]
         input_enc = self.tokenizer(item["abstract"], truncation=True, padding="max_length", max_length=self.max_input_len, return_tensors="pt")
         target_enc = self.tokenizer(item["slides"], truncation=True, padding="max_length", max_length=self.max_output_len, return_tensors="pt")
+        labels = target_enc["input_ids"].squeeze()
+        labels[labels == tokenizer.pad_token_id] = -100  # Mask padding
         return {
             "input_ids": input_enc["input_ids"].squeeze(),
             "attention_mask": input_enc["attention_mask"].squeeze(),
-            "labels": target_enc["input_ids"].squeeze()
+            "labels": labels
         }
 
-# Load and preprocess
 arxiv_data = preprocess(load_jsonl(ARXIV_PATH), "arXiv")
 pubmed_data = preprocess(load_jsonl(PUBMED_PATH), "PubMed")
 all_data = arxiv_data + pubmed_data
-train_data, val_data = train_test_split(all_data, test_size=0.1, random_state=42)
 
-# Datasets and Loaders
+train_data, val_data = train_test_split(all_data, test_size=0.1, random_state=42)
+train_data = train_data[:1024]  # Debug subset
+val_data = val_data[:256]
+
 train_dataset = SlideDataset(train_data, tokenizer)
 val_dataset = SlideDataset(val_data, tokenizer)
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=4)
 
-# Optimizer and scheduler
-optimizer = AdamW(model.parameters(), lr=5e-5)
+optimizer = AdamW(model.parameters(), lr=2e-5)
 scheduler = get_linear_schedule_with_warmup(optimizer, 0, len(train_loader) * 3)
-
-# TensorBoard writer
+scaler = torch.amp.GradScaler(device_type="cuda")
 writer = SummaryWriter("runs/SlideGenAI")
 
-# Training loop
 def train_model(epochs=3):
     model.train()
     loss_list = []
 
     for epoch in range(epochs):
         total_loss = 0
-        print(f"Epoch {epoch+1}/{epochs}")
+        print(f"\n🚀 Epoch {epoch+1}/{epochs}")
         for step, batch in enumerate(tqdm(train_loader)):
+            start_time = time.time()
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            loss = outputs.loss
-            loss.backward()
+            with torch.amp.autocast(device_type="cuda"):
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                loss = outputs.loss
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            scheduler.step()
 
             total_loss += loss.item()
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
-
             global_step = epoch * len(train_loader) + step
             writer.add_scalar("Train/Loss", loss.item(), global_step)
 
+            elapsed = time.time() - start_time
+            if step % 50 == 0:
+                print(f"Step {step} - Loss: {loss.item():.4f} - Time: {elapsed:.2f}s")
+
         avg_loss = total_loss / len(train_loader)
         loss_list.append(avg_loss)
-        print(f"Average Loss: {avg_loss:.4f}")
+        print(f"✅ Epoch {epoch+1} Avg Loss: {avg_loss:.4f}")
 
-    # Save model
     torch.save(model.state_dict(), "flan_t5_slidegen.pth")
-    print("Model saved to flan_t5_slidegen.pth")
+    print("💾 Model saved to flan_t5_slidegen.pth")
 
-    # Loss plot
     plt.figure()
     plt.plot(range(1, epochs + 1), loss_list, marker='o')
     plt.title("Training Loss over Epochs")
@@ -141,10 +140,9 @@ def train_model(epochs=3):
     plt.ylabel("Loss")
     plt.grid(True)
     plt.savefig("training_loss_plot.png")
-    print("Saved loss plot to training_loss_plot.png")
+    print("📊 Loss plot saved to training_loss_plot.png")
 
-# Optional: Validate with ROUGE
-def evaluate_model(n_samples=10):
+def evaluate_model(n_samples=20):
     model.eval()
     scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
     scores = []
@@ -166,7 +164,7 @@ def evaluate_model(n_samples=10):
     avg_r2 = np.mean([s['rouge2'].fmeasure for s in scores])
     avg_rl = np.mean([s['rougeL'].fmeasure for s in scores])
 
-    print(f"ROUGE-1: {avg_r1:.4f}, ROUGE-2: {avg_r2:.4f}, ROUGE-L: {avg_rl:.4f}")
+    print(f"📈 ROUGE-1: {avg_r1:.4f}, ROUGE-2: {avg_r2:.4f}, ROUGE-L: {avg_rl:.4f}")
 
 if __name__ == "__main__":
     train_model(epochs=3)
