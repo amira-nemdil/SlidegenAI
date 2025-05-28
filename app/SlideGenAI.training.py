@@ -1,9 +1,6 @@
- # SlideGenAI Training Script with AMP Fixes, Padding Fix, and Scheduler Order
-
 import os
 import json
 import torch
-import random
 import numpy as np
 import time
 from tqdm import tqdm
@@ -13,8 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import train_test_split
 from transformers import (
     AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    get_linear_schedule_with_warmup
+    AutoModelForSeq2SeqLM
 )
 from torch.optim import AdamW
 from rouge_score import rouge_scorer
@@ -22,7 +18,6 @@ from rouge_score import rouge_scorer
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if device.type != "cuda":
     raise RuntimeError("🚨 GPU not detected. Please install PyTorch with CUDA support.")
-
 print("✅ Using device:", torch.cuda.get_device_name(0))
 
 MODEL_NAME = "google/flan-t5-large"
@@ -70,29 +65,30 @@ class SlideDataset(Dataset):
         input_enc = self.tokenizer(item["abstract"], truncation=True, padding="max_length", max_length=self.max_input_len, return_tensors="pt")
         target_enc = self.tokenizer(item["slides"], truncation=True, padding="max_length", max_length=self.max_output_len, return_tensors="pt")
         labels = target_enc["input_ids"].squeeze()
-        labels[labels == tokenizer.pad_token_id] = -100  # Mask padding
+        labels = labels.masked_fill(labels == tokenizer.pad_token_id, -100).long()  # Fix
         return {
             "input_ids": input_enc["input_ids"].squeeze(),
             "attention_mask": input_enc["attention_mask"].squeeze(),
             "labels": labels
         }
 
+# Load data
 arxiv_data = preprocess(load_jsonl(ARXIV_PATH), "arXiv")
 pubmed_data = preprocess(load_jsonl(PUBMED_PATH), "PubMed")
 all_data = arxiv_data + pubmed_data
-
 train_data, val_data = train_test_split(all_data, test_size=0.1, random_state=42)
-train_data = train_data[:1024]  # Debug subset
-val_data = val_data[:256]
 
 train_dataset = SlideDataset(train_data, tokenizer)
 val_dataset = SlideDataset(val_data, tokenizer)
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=4)
 
-optimizer = AdamW(model.parameters(), lr=2e-5)
-scheduler = get_linear_schedule_with_warmup(optimizer, 0, len(train_loader) * 3)
-scaler = torch.amp.GradScaler(device_type="cuda")
+# Check labels
+print("🔍 Sanity check on first labels:")
+print(train_dataset[0]["labels"])
+
+# Optimizer only (no scheduler or AMP)
+optimizer = AdamW(model.parameters(), lr=1e-5)
 writer = SummaryWriter("runs/SlideGenAI")
 
 def train_model(epochs=3):
@@ -108,22 +104,24 @@ def train_model(epochs=3):
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            with torch.amp.autocast(device_type="cuda"):
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                loss = outputs.loss
+            # No AMP, simple FP32
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            loss = outputs.loss
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            if torch.isnan(loss):
+                print(f"⚠️ Step {step} Loss is NaN. Skipping.")
+                continue
+
+            loss.backward()
+            optimizer.step()
             optimizer.zero_grad()
-            scheduler.step()
 
             total_loss += loss.item()
             global_step = epoch * len(train_loader) + step
             writer.add_scalar("Train/Loss", loss.item(), global_step)
 
-            elapsed = time.time() - start_time
-            if step % 50 == 0:
+            if step % 100 == 0:
+                elapsed = time.time() - start_time
                 print(f"Step {step} - Loss: {loss.item():.4f} - Time: {elapsed:.2f}s")
 
         avg_loss = total_loss / len(train_loader)
