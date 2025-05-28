@@ -18,6 +18,11 @@ from transformers import (
 from torch.optim import AdamW
 from rouge_score import rouge_scorer
 
+import torch
+print(torch.cuda.is_available())
+print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU detected")
+
+
 # Device setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
