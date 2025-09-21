@@ -1,52 +1,103 @@
-# SlidegenAI
-Develop a system that generates presentation slides from a user-provided prompt or PDF document. The user may optionally specify the number of slides; if not, the system determines an appropriate structure automatically. The focus is on content quality and contextual coherence, not visual design.
+# SlidegenAI - AI-Powered Presentation Generator
 
-System Components & Flow
+![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Input Handling
+SlidegenAI is an intelligent system that automatically generates structured presentation content from text prompts or PDF documents, focusing on content quality and contextual coherence.
 
-Accepts either a text prompt or a PDF file.
+## ✨ Key Features
+- **Multi-Input Support**: Accepts both text prompts and PDF documents
+- **Context-Aware Generation**: Maintains logical flow through semantic understanding
+- **Flexible Output**:
+  - Automatic slide count determination
+  - Custom slide number specification
+  - JSON/text outputs (PPTX support coming soon)
+- **Advanced Processing**:
+  - PDF text extraction with PyMuPDF/pdfminer
+  - NLP-powered content analysis using Transformers
+  - Semantic segmentation and summarization
 
-Optionally accepts a specified number of slides.
+## 🚀 Getting Started
 
-Extracts text from PDFs using a text extraction module.
+### Prerequisites
+- Python 3.8+
+- pip package manager
 
-Natural Language Processing (NLP)
+### Installation
+```bash
+git clone https://github.com/amira-nemdil/SlidegenAI.git
+cd SlidegenAI
+python -m venv venv
+source venv/bin/activate  # Linux/MacOS
+pip install -r requirements.txt
+```
 
-Processes and understands the input using a pre-trained NLP model.
+## 🛠️ Usage
 
-Applies summarization and segmentation logic to break the content into coherent slide sections.
+### Basic CLI Usage
+```bash
+# From text prompt
+python slidegen.py --prompt "Quantum computing fundamentals" --slides 5
 
-Performs semantic understanding to ensure content fidelity and logical flow.
+# From PDF document
+python slidegen.py --pdf input.pdf --output presentation.json
+```
 
-Slide Content Generation
+### API Integration
+```python
+from slidegen import SlideGenerator
 
-Generates structured content for each slide, including titles, bullet points, and short descriptions.
+generator = SlideGenerator()
+presentation = generator.generate(
+    source="prompt", 
+    content="Renewable energy trends 2025",
+    slides=7
+)
+```
 
-Respects the slide count if provided, otherwise dynamically determines the number of slides.
+## 📦 Output Structure
+```json
+{
+  "metadata": {
+    "total_slides": 5,
+    "generated_at": "2025-09-21T02:48:02Z"
+  },
+  "slides": [
+    {
+      "slide_number": 1,
+      "title": "Introduction to Quantum Computing",
+      "content": {
+        "bullet_points": [
+          "Definition and basic principles",
+          "Historical development timeline"
+        ],
+        "summary": "Fundamental concepts..."
+      }
+    }
+  ]
+}
+```
 
-Output Formatting
+## 🧠 Technology Stack
+- **Core Language**: Python 3.8+
+- **NLP Engine**: Hugging Face Transformers
+- **PDF Processing**: PyMuPDF/pdfminer
+- **ML Support**: Scikit-learn
+- **Optional Integration**: OpenAI/Cohere APIs
 
-For prototyping, outputs text-based slides as JSON or plain text.
+## 🤝 Contributing
+Contributions are welcome! Please follow these steps:
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-Later stages may involve converting to formats such as .pptx using libraries like python-pptx.
+## 📄 License
+[License details to be added - check back soon]
 
-Model Usage and Training
-
-The system will initially use pre-trained NLP models for summarization and text generation.
-
-A custom fine-tuned model may be trained later to improve domain-specific performance or better adapt to presentation structures.
-
-A dataset of documents and human-written slide content will be collected and cleaned before any training is conducted.
-
-Technologies and Tools
-
-Python as the main programming language.
-
-VS Code as the development environment.
-
-External libraries: Transformers (Hugging Face), PyMuPDF or pdfminer (for PDF reading), Scikit-learn, and possibly OpenAI or Cohere APIs.
-
-Folder Structure
-Clearly separated into components such as app logic, models, data, notebooks for experimentation, and output directories.
+## 🙏 Acknowledgments
+- Hugging Face for Transformers library
+- PyMuPDF developers
+- OpenAI/Cohere API teams logic, models, data, notebooks for experimentation, and output directories.
 https://www.researchgate.net/publication/380553365_Presentify_Automated_Presentation_Slide_Generation_from_Research_Papers_using_NLP_and_Deep_Learning_May_2024
